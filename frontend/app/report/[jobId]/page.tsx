@@ -6,6 +6,47 @@ import { Card } from '@/components/Card';
 import { Button } from '@/components/Button';
 import { apiClient, TaxReport } from '@/lib/api';
 
+// Helper: Format amount with commas and 2 decimals
+function formatAmount(value: string | number): string {
+  const num = typeof value === 'string' ? parseFloat(value) : value;
+  return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Helper: Color-coded amount text
+function AmountText({ amount, className = '' }: { amount: string | number; className?: string }) {
+  const num = typeof amount === 'string' ? parseFloat(amount) : amount;
+  const colorClass = num > 0 ? 'text-blue-400' : num < 0 ? 'text-red-400' : 'text-zinc-400';
+  return <span className={`${colorClass} ${className}`}>${formatAmount(amount)}</span>;
+}
+
+// Helper: Parse strategy body and apply colors to amounts
+function StrategyBody({ text }: { text: string }) {
+  // Split by sentences (. followed by space or end of string)
+  const sentences = text.split(/\.\s+/).filter(s => s.trim());
+
+  return (
+    <div className="space-y-2 leading-relaxed">
+      {sentences.map((sentence, idx) => {
+        // Find dollar amounts in the sentence
+        const parts = sentence.split(/(\$[\d,]+\.?\d*)/);
+
+        return (
+          <p key={idx} className="text-sm text-zinc-400">
+            {parts.map((part, i) => {
+              if (part.startsWith('$')) {
+                const amount = part.substring(1).replace(/,/g, '');
+                return <AmountText key={i} amount={amount} className="font-medium" />;
+              }
+              return <span key={i}>{part}</span>;
+            })}
+            {idx < sentences.length - 1 && '.'}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function ReportPage() {
   const params = useParams();
   const router = useRouter();
@@ -15,6 +56,8 @@ export default function ReportPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 20;
 
   useEffect(() => {
     const fetchReport = async () => {
@@ -55,6 +98,12 @@ export default function ReportPage() {
     ? report.events
     : report.events.filter(e => e.category === selectedCategory);
 
+  // Pagination
+  const totalPages = Math.ceil(filteredEvents.length / pageSize);
+  const startIdx = (currentPage - 1) * pageSize;
+  const endIdx = startIdx + pageSize;
+  const paginatedEvents = filteredEvents.slice(startIdx, endIdx);
+
   return (
     <div className="min-h-screen bg-black">
       {/* Background */}
@@ -62,32 +111,33 @@ export default function ReportPage() {
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-900/10 via-transparent to-transparent" />
       </div>
 
-      {/* Content */}
-      <div className="relative">
-        <div className="mx-auto max-w-7xl px-6 py-12">
-          {/* Header */}
-          <div className="mb-12">
-            <button
-              onClick={() => router.push('/')}
-              className="text-zinc-400 hover:text-white mb-4 flex items-center gap-2 text-sm"
-            >
-              ← Back
-            </button>
-            <h1 className="text-4xl font-bold text-white mb-2">
-              Tax Report {report.summary.year}
-            </h1>
-            <p className="text-zinc-400 font-mono text-sm">
-              {report.summary.address}
-            </p>
-          </div>
+      {/* Content - Centered Container */}
+      <div className="relative flex justify-center">
+        <div className="w-full px-6 md:px-10 py-12" style={{ maxWidth: '1100px' }}>
+          {/* Page Sections with Consistent Spacing */}
+          <div className="space-y-8 md:space-y-10">
 
-          {/* KPI Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
-            <Card>
-              <div className="space-y-2">
+            {/* Section 1: Header */}
+            <section>
+              <button
+                onClick={() => router.push('/')}
+                className="text-zinc-400 hover:text-white mb-6 flex items-center gap-2 text-sm"
+              >
+                ← Back
+              </button>
+              <h1 className="text-4xl font-bold text-white mb-2">
+                Tax Report {report.summary.year} for {report.summary.address}
+              </h1>
+            </section>
+
+            {/* Section 2: KPI Cards */}
+            <section>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <Card className="p-6">
+              <div className="space-y-3">
                 <p className="text-sm text-zinc-500">Ordinary Income</p>
                 <p className="text-3xl font-bold text-white">
-                  ${parseFloat(report.summary.ordinaryIncome).toLocaleString()}
+                  ${formatAmount(report.summary.ordinaryIncome)}
                 </p>
                 <p className="text-xs text-zinc-600">
                   Airdrops & Staking
@@ -95,60 +145,59 @@ export default function ReportPage() {
               </div>
             </Card>
 
-            <Card>
-              <div className="space-y-2">
+            <Card className="p-6">
+              <div className="space-y-3">
                 <p className="text-sm text-zinc-500">Realized P&L</p>
                 <p className="text-3xl font-bold text-white">
-                  ${parseFloat(report.summary.capitalGainRealized).toLocaleString()}
+                  ${formatAmount(report.summary.capitalGainRealized)}
                 </p>
                 <div className="flex gap-2 text-xs">
                   <span className="text-zinc-600">
-                    ST: ${parseFloat(report.summary.shortTermGain).toLocaleString()}
+                    ST: ${formatAmount(report.summary.shortTermGain)}
                   </span>
                   <span className="text-zinc-600">
-                    LT: ${parseFloat(report.summary.longTermGain).toLocaleString()}
+                    LT: ${formatAmount(report.summary.longTermGain)}
                   </span>
                 </div>
               </div>
             </Card>
 
-            <Card>
-              <div className="space-y-2">
-                <p className="text-sm text-zinc-500">Gas Fees Paid</p>
+            <Card className="p-6">
+              <div className="space-y-3">
+                <p className="text-sm text-zinc-500">Unrealized P&L</p>
                 <p className="text-3xl font-bold text-white">
-                  ${parseFloat(report.summary.totalGasFee).toLocaleString()}
+                  ${formatAmount(report.summary.capitalGainUnrealized)}
                 </p>
                 <p className="text-xs text-zinc-600">
-                  Deductible
+                  Current Holdings
                 </p>
               </div>
             </Card>
 
-            <Card className="bg-blue-600/10 border-blue-600/20">
-              <div className="space-y-2">
+            <Card className="p-6 bg-blue-600/10 border-blue-600/20">
+              <div className="space-y-3">
                 <p className="text-sm text-blue-400">Estimated Tax Due</p>
                 <p className="text-3xl font-bold text-blue-500">
-                  ${parseFloat(report.summary.estimatedTaxDue).toLocaleString()}
+                  ${formatAmount(report.summary.estimatedTaxDue)}
                 </p>
                 <p className="text-xs text-blue-400/60">
                   Based on {(report.summary.taxRates.ordinaryIncome * 100).toFixed(0)}% rate
                 </p>
               </div>
             </Card>
-          </div>
+              </div>
+            </section>
 
-          {/* Strategy Cards */}
-          {report.strategyCards && report.strategyCards.length > 0 && (
-            <div className="mb-12">
-              <h2 className="text-2xl font-bold text-white mb-6">Tax-Saving Strategies</h2>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Section 3: Tax-Saving Strategies */}
+            {report.strategyCards && report.strategyCards.length > 0 && (
+              <section className="w-full">
+                <h2 className="text-2xl font-bold text-white mb-6">Tax-Saving Strategies</h2>
+              <div className="space-y-6">
                 {report.strategyCards.map((strategy, idx) => (
                   <Card
                     key={idx}
                     hover
-                    className={`
-                      ${strategy.priority === 'high' ? 'border-blue-600/30' : ''}
-                    `}
+                    className={`p-6 md:p-8 ${strategy.priority === 'high' ? 'border-blue-600/30' : ''}`}
                   >
                     <div className="flex items-start gap-4">
                       <div className={`
@@ -159,21 +208,21 @@ export default function ReportPage() {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
                         </svg>
                       </div>
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between mb-2">
-                          <h3 className="font-bold text-white">{strategy.title}</h3>
+                      <div className="flex-1 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h3 className="font-bold text-white text-lg">{strategy.title}</h3>
                           {strategy.estimatedSavings && (
                             <span className="text-sm font-medium text-blue-500">
                               {strategy.estimatedSavings}
                             </span>
                           )}
                         </div>
-                        <p className="text-sm text-zinc-400 mb-4">{strategy.body}</p>
+                        <StrategyBody text={strategy.body} />
                         {strategy.actions && strategy.actions.length > 0 && (
-                          <ul className="space-y-2">
+                          <ul className="space-y-3 mt-4">
                             {strategy.actions.map((action, i) => (
-                              <li key={i} className="flex items-start gap-2 text-xs text-zinc-500">
-                                <svg className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                              <li key={i} className="flex items-start gap-3 text-sm text-zinc-500 leading-relaxed">
+                                <svg className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                                 </svg>
                                 {action}
@@ -186,18 +235,21 @@ export default function ReportPage() {
                   </Card>
                 ))}
               </div>
-            </div>
-          )}
+              </section>
+            )}
 
-          {/* Transactions */}
-          <div>
-            <div className="flex items-center justify-between mb-6">
+            {/* Section 4: Transactions */}
+            <section>
+              <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-white">Transactions</h2>
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
                 {['all', 'DISPOSAL', 'AIRDROP', 'STAKING', 'TRANSFER'].map((cat) => (
                   <button
                     key={cat}
-                    onClick={() => setSelectedCategory(cat)}
+                    onClick={() => {
+                      setSelectedCategory(cat);
+                      setCurrentPage(1);
+                    }}
                     className={`
                       px-4 py-2 rounded-lg text-sm font-medium transition-all
                       ${selectedCategory === cat
@@ -210,20 +262,20 @@ export default function ReportPage() {
                   </button>
                 ))}
               </div>
-            </div>
+              </div>
 
-            <div className="space-y-3">
+              <div className="space-y-3 mt-4">
               {filteredEvents.length === 0 ? (
                 <Card className="p-8 text-center">
                   <p className="text-zinc-500">No transactions found</p>
                 </Card>
               ) : (
-                filteredEvents.slice(0, 20).map((event) => (
-                  <Card key={event.id} hover className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-4 flex-1">
+                paginatedEvents.map((event) => (
+                  <Card key={event.id} hover className="p-6">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-4 flex-1 min-w-0">
                         <div className={`
-                          px-3 py-1 rounded-full text-xs font-medium
+                          px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap
                           ${event.category === 'DISPOSAL' ? 'bg-red-600/20 text-red-400' : ''}
                           ${event.category === 'AIRDROP' ? 'bg-green-600/20 text-green-400' : ''}
                           ${event.category === 'STAKING' ? 'bg-blue-600/20 text-blue-400' : ''}
@@ -231,29 +283,38 @@ export default function ReportPage() {
                         `}>
                           {event.category}
                         </div>
-                        <div className="flex-1">
-                          <p className="text-sm text-white font-medium font-mono">
+                        <div className="flex-1 min-w-0">
+                          <a
+                            href={`https://etherscan.io/tx/${event.txHash}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sm text-blue-400 hover:text-blue-300 font-medium font-mono block truncate"
+                          >
                             {event.txHash.slice(0, 10)}...{event.txHash.slice(-8)}
-                          </p>
+                          </a>
                           <p className="text-xs text-zinc-500">
                             {new Date(event.timestamp).toLocaleDateString()}
                           </p>
                         </div>
                         {event.protocol && (
-                          <span className="text-xs text-zinc-600">{event.protocol}</span>
+                          <span className="text-xs text-zinc-600 hidden md:block">{event.protocol}</span>
                         )}
                       </div>
-                      <div className="text-right">
+                      <div className="text-right whitespace-nowrap">
                         {event.realizedGain && (
                           <p className={`text-sm font-medium ${parseFloat(event.realizedGain) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                            ${parseFloat(event.realizedGain).toFixed(2)}
+                            ${formatAmount(event.realizedGain)}
                           </p>
                         )}
-                        {event.tokenInUsd && (
+                        {event.tokenInUsd && parseFloat(event.tokenInUsd) > 0 ? (
                           <p className="text-xs text-zinc-500">
-                            ${parseFloat(event.tokenInUsd).toFixed(2)}
+                            ${formatAmount(event.tokenInUsd)}
                           </p>
-                        )}
+                        ) : event.tokenInUsd && parseFloat(event.tokenInUsd) === 0 && event.category !== 'DISPOSAL' ? (
+                          <p className="text-xs text-zinc-600">
+                            —
+                          </p>
+                        ) : null}
                       </div>
                     </div>
                   </Card>
@@ -261,11 +322,62 @@ export default function ReportPage() {
               )}
             </div>
 
-            {filteredEvents.length > 20 && (
-              <p className="text-center text-sm text-zinc-500 mt-6">
-                Showing 20 of {filteredEvents.length} transactions
-              </p>
+            {/* Pagination */}
+            {filteredEvents.length > pageSize && (
+              <div className="mt-6 flex items-center justify-between">
+                <p className="text-sm text-zinc-500">
+                  Showing {startIdx + 1}–{Math.min(endIdx, filteredEvents.length)} of {filteredEvents.length}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="px-3 py-1 rounded-lg text-sm font-medium bg-zinc-900/50 text-zinc-400 hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    ←
+                  </button>
+                  <div className="flex gap-1">
+                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                      let pageNum: number;
+                      if (totalPages <= 5) {
+                        pageNum = i + 1;
+                      } else if (currentPage <= 3) {
+                        pageNum = i + 1;
+                      } else if (currentPage >= totalPages - 2) {
+                        pageNum = totalPages - 4 + i;
+                      } else {
+                        pageNum = currentPage - 2 + i;
+                      }
+
+                      return (
+                        <button
+                          key={pageNum}
+                          onClick={() => setCurrentPage(pageNum)}
+                          className={`
+                            px-3 py-1 rounded-lg text-sm font-medium transition-all
+                            ${currentPage === pageNum
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-zinc-900/50 text-zinc-400 hover:bg-zinc-800'
+                            }
+                          `}
+                        >
+                          {pageNum}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="px-3 py-1 rounded-lg text-sm font-medium bg-zinc-900/50 text-zinc-400 hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    →
+                  </button>
+                </div>
+              </div>
             )}
+            </section>
+
           </div>
         </div>
       </div>

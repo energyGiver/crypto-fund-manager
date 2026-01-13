@@ -40,6 +40,22 @@ export class ClassifierService {
   ) {}
 
   /**
+   * Safely parse hex string to BigNumber
+   * Handles empty strings like "0x" and returns "0"
+   */
+  private safeBigNumber(value: string): ethers.BigNumber {
+    if (!value || value === '0x' || value === '') {
+      return ethers.BigNumber.from(0);
+    }
+    try {
+      return ethers.BigNumber.from(value);
+    } catch (error) {
+      this.logger.warn(`Failed to parse BigNumber from "${value}", defaulting to 0`);
+      return ethers.BigNumber.from(0);
+    }
+  }
+
+  /**
    * Classify all transactions for a job
    */
   async classifyTransactions(jobId: string): Promise<void> {
@@ -118,8 +134,8 @@ export class ClassifierService {
     const logs = JSON.parse(tx.logs);
 
     // Calculate gas fee
-    const gasFeeEth = ethers.BigNumber.from(tx.gasUsed)
-      .mul(ethers.BigNumber.from(tx.gasPrice))
+    const gasFeeEth = this.safeBigNumber(tx.gasUsed)
+      .mul(this.safeBigNumber(tx.gasPrice))
       .toString();
 
     // Normalize addresses
@@ -158,7 +174,7 @@ export class ClassifierService {
     }
 
     // Check for ETH transfers
-    if (ethers.BigNumber.from(tx.value).gt(0)) {
+    if (this.safeBigNumber(tx.value).gt(0)) {
       events.push({
         txHash: tx.txHash,
         timestamp: tx.timestamp,
@@ -247,19 +263,19 @@ export class ClassifierService {
     if (userTransfersOut.length > 0) {
       const transfer = userTransfersOut[0];
       tokenOut = transfer.address.toLowerCase();
-      tokenOutAmount = ethers.BigNumber.from(transfer.data).toString();
+      tokenOutAmount = this.safeBigNumber(transfer.data).toString();
     }
 
     // Token in (user received)
     if (userTransfersIn.length > 0) {
       const transfer = userTransfersIn[userTransfersIn.length - 1];
       tokenIn = transfer.address.toLowerCase();
-      tokenInAmount = ethers.BigNumber.from(transfer.data).toString();
+      tokenInAmount = this.safeBigNumber(transfer.data).toString();
     }
 
     // Handle ETH value
     const ethValue = tx.value;
-    if (ethers.BigNumber.from(ethValue).gt(0)) {
+    if (this.safeBigNumber(ethValue).gt(0)) {
       if (!tokenOut) {
         tokenOut = 'ETH';
         tokenOutSymbol = 'ETH';
@@ -337,7 +353,7 @@ export class ClassifierService {
     for (const transfer of transfers) {
       const from = transfer.topics[1] ? '0x' + transfer.topics[1].slice(26).toLowerCase() : '';
       const to = transfer.topics[2] ? '0x' + transfer.topics[2].slice(26).toLowerCase() : '';
-      const amount = ethers.BigNumber.from(transfer.data).toString();
+      const amount = this.safeBigNumber(transfer.data).toString();
 
       // Incoming transfer to user
       if (to === userAddress) {
@@ -420,7 +436,7 @@ export class ClassifierService {
 
         // Calculate net flow (this helps identify which token was exchanged for which)
         tokenTransfers.forEach(t => {
-          const amount = ethers.BigNumber.from(t.data);
+          const amount = this.safeBigNumber(t.data);
           // We can't track specific from/to, so we sum all transfers
           totalIn = totalIn.add(amount);
           totalOut = totalOut.add(amount);
@@ -440,11 +456,11 @@ export class ClassifierService {
       // This is a heuristic but works for most swap patterns
       const tokenOut = tokens[0];
       const tokenOutTransfers = tokenMap.get(tokenOut)!;
-      const tokenOutAmount = ethers.BigNumber.from(tokenOutTransfers[0].data).toString();
+      const tokenOutAmount = this.safeBigNumber(tokenOutTransfers[0].data).toString();
 
       const tokenIn = tokens[tokens.length - 1];
       const tokenInTransfers = tokenMap.get(tokenIn)!;
-      const tokenInAmount = ethers.BigNumber.from(tokenInTransfers[tokenInTransfers.length - 1].data).toString();
+      const tokenInAmount = this.safeBigNumber(tokenInTransfers[tokenInTransfers.length - 1].data).toString();
 
       events.push({
         txHash: tx.txHash,
@@ -470,7 +486,7 @@ export class ClassifierService {
         timestamp: tx.timestamp,
         category: TaxCategory.TRANSFER,
         tokenOut: token,
-        tokenOutAmount: ethers.BigNumber.from(tokenTransfers[0].data).toString(),
+        tokenOutAmount: this.safeBigNumber(tokenTransfers[0].data).toString(),
         gasFeeEth,
         notes: 'Token interaction via proxy',
       });

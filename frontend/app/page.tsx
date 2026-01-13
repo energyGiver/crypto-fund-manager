@@ -46,11 +46,13 @@ export default function Home() {
 
       {/* Content - Central Column Layout */}
       <div className="relative flex justify-center">
-        {/* Centered content container - 60vw with max 1100px */}
-        <div className="w-full px-6 sm:px-8 lg:px-12 py-16 sm:py-24" style={{ maxWidth: 'min(90vw, 1100px)' }}>
+        {/* Centered content container */}
+        <div className="w-full px-6 md:px-10 py-16 sm:py-24" style={{ maxWidth: '1100px' }}>
+          {/* Page Sections with Consistent Spacing */}
+          <div className="space-y-16 md:space-y-20">
 
-          {/* Hero Section */}
-          <section className="text-center space-y-10 mb-24 sm:mb-32 lg:mb-40">
+            {/* Section 1: Hero */}
+            <section className="text-center space-y-10">
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-600/10 border border-blue-600/20">
               <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
               <span className="text-sm text-blue-400 font-medium">On-chain Tax Calculator</span>
@@ -88,10 +90,10 @@ export default function Home() {
                 <span>Tax strategies included</span>
               </div>
             </div>
-          </section>
+            </section>
 
-          {/* Get Started Section */}
-          <section>
+            {/* Section 2: Get Started */}
+            <section>
             <Card className="p-8 sm:p-10 border-0">
               <h2 className="text-2xl font-bold text-white mb-8">Get Started</h2>
 
@@ -217,8 +219,9 @@ export default function Home() {
                 </div>
               </Card>
             </div>
-          </section>
+            </section>
 
+          </div>
         </div>
       </div>
     </div>

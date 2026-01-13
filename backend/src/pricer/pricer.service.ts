@@ -11,6 +11,17 @@ const STABLECOINS = new Set([
   '0x4fabb145d64652a948d72533023f6e7a623c7c53', // BUSD
 ]);
 
+// Token decimals (most ERC20 use 18, but stablecoins and WBTC use different)
+const TOKEN_DECIMALS: { [address: string]: number } = {
+  // Stablecoins (6 decimals)
+  '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': 6,  // USDC
+  '0xdac17f958d2ee523a2206206994597c13d831ec7': 6,  // USDT
+  '0x4fabb145d64652a948d72533023f6e7a623c7c53': 6,  // BUSD
+  // WBTC (8 decimals)
+  '0x2260fac5e5542a773aa44fbcfedf7c193bc2c599': 8,  // WBTC
+  // Default: 18 decimals for most ERC20
+};
+
 interface PriceData {
   priceUsd: string;
   source: string;
@@ -41,10 +52,10 @@ export class PricerService {
 
       try {
         // Price tokens
-        if (event.tokenIn) {
+        if (event.tokenIn && event.tokenInSymbol && event.tokenInSymbol !== 'UNKNOWN') {
           const price = await this.getTokenPrice(
             event.tokenIn,
-            event.tokenInSymbol || 'UNKNOWN',
+            event.tokenInSymbol,
             event.timestamp,
           );
 
@@ -59,12 +70,14 @@ export class PricerService {
               data: { tokenInUsd: usdValue },
             });
           }
+        } else if (event.tokenIn && !event.tokenInSymbol) {
+          this.logger.debug(`Skipping price lookup for tokenIn ${event.tokenIn}: No symbol available (tx: ${event.txHash})`);
         }
 
-        if (event.tokenOut) {
+        if (event.tokenOut && event.tokenOutSymbol && event.tokenOutSymbol !== 'UNKNOWN') {
           const price = await this.getTokenPrice(
             event.tokenOut,
-            event.tokenOutSymbol || 'UNKNOWN',
+            event.tokenOutSymbol,
             event.timestamp,
           );
 
@@ -79,6 +92,8 @@ export class PricerService {
               data: { tokenOutUsd: usdValue },
             });
           }
+        } else if (event.tokenOut && !event.tokenOutSymbol) {
+          this.logger.debug(`Skipping price lookup for tokenOut ${event.tokenOut}: No symbol available (tx: ${event.txHash})`);
         }
 
         // Price gas fee in ETH
@@ -229,9 +244,8 @@ export class PricerService {
       return 18;
     }
 
-    // For MVP, assume 18 decimals
-    // In production, you'd fetch this from the token contract
-    return 18;
+    const normalizedAddress = tokenAddress.toLowerCase();
+    return TOKEN_DECIMALS[normalizedAddress] || 18;
   }
 
   private sleep(ms: number): Promise<void> {
