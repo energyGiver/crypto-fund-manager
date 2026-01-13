@@ -1,0 +1,175 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Job tracking for async report generation
+model Job {
+  id          String   @id @default(uuid())
+  address     String
+  year        Int
+  month       Int?     // 1-12 for specific month, null for full year
+  network     String   @default("ethereum") // ethereum, sepolia
+  stage       String   @default("PENDING") // PENDING, FETCHING_TX, CLASSIFYING, PRICING, CALCULATING, DONE, ERROR
+  progressPct Int      @default(0)
+  etaHint     String?
+  errors      String?  // JSON string
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  transactions Transaction[]
+  taxEvents    TaxEvent[]
+  report       Report?
+
+  @@unique([address, year, month, network])
+  @@index([address])
+}
+
+// Raw transaction data from blockchain
+model Transaction {
+  id              String   @id @default(uuid())
+  jobId           String
+  job             Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  txHash          String
+  blockNumber     Int
+  timestamp       DateTime
+  from            String
+  to              String?
+  value           String   // ETH value in wei (string to handle big numbers)
+  gasUsed         String
+  gasPrice        String
+
+  // Transaction data
+  input           String   // Hex data
+  methodSelector  String?  // First 4 bytes of input
+
+  // Receipt data
+  status          Int      // 1 = success, 0 = failed
+  logs            String   // JSON string of logs
+
+  createdAt       DateTime @default(now())
+
+  @@index([jobId])
+  @@index([txHash])
+}
+
+// Classified tax events
+model TaxEvent {
+  id              String   @id @default(uuid())
+  jobId           String
+  job             Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  txHash          String
+  timestamp       DateTime
+  category        String   // DISPOSAL, STAKING, AIRDROP, TRANSFER, DEDUCTION
+
+  // Token information
+  tokenIn         String?  // Token address or "ETH"
+  tokenInSymbol   String?
+  tokenInAmount   String?  // String to handle big numbers
+  tokenInUsd      String?  // USD value at time of transaction
+
+  tokenOut        String?
+  tokenOutSymbol  String?
+  tokenOutAmount  String?
+  tokenOutUsd     String?
+
+  // Gas fees
+  gasFeeEth       String
+  gasFeeUsd       String?
+
+  // Tax calculation results (filled by TaxEngine)
+  costBasis       String?  // Cost basis in USD
+  proceeds        String?  // Proceeds in USD
+  realizedGain    String?  // Realized gain/loss in USD
+  holdingPeriod   Int?     // Days held (for short/long term determination)
+
+  // Additional metadata
+  protocol        String?  // e.g., "Uniswap V2", "Lido", etc.
+  notes           String?
+
+  createdAt       DateTime @default(now())
+
+  @@index([jobId])
+  @@index([category])
+}
+
+// Final tax report
+model Report {
+  id                        String   @id @default(uuid())
+  jobId                     String   @unique
+  job                       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  // Summary metrics
+  ordinaryIncomeUsd         String   @default("0")
+  capitalGainRealizedUsd    String   @default("0")
+  capitalGainUnrealizedUsd  String   @default("0")
+  shortTermGainUsd          String   @default("0")
+  longTermGainUsd           String   @default("0")
+  totalGasFeeUsd            String   @default("0")
+  estimatedTaxDue           String   @default("0")
+
+  // Tax rates used
+  ordinaryIncomeTaxRate     Float    @default(0.30)
+  shortTermCgRate           Float    @default(0.30)
+  longTermCgRate            Float    @default(0.15)
+
+  // Strategy cards (JSON array)
+  strategyCards             String?  // JSON string
+
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+}
+
+// Cache for token prices
+model PriceCache {
+  id              String   @id @default(uuid())
+  tokenAddress    String
+  tokenSymbol     String
+  timestamp       DateTime
+  priceUsd        String
+  source          String   // "coinmarketcap", "dex", "stable"
+
+  createdAt       DateTime @default(now())
+
+  @@unique([tokenAddress, timestamp])
+  @@index([tokenAddress])
+  @@index([tokenSymbol])
+}
+
+// Cost basis lots for FIFO calculation
+model CostLot {
+  id              String   @id @default(uuid())
+  address         String   // User address
+  tokenAddress    String
+  tokenSymbol     String
+
+  // Acquisition info
+  acquiredDate    DateTime
+  acquiredTxHash  String
+  amount          String   // Amount acquired
+  costBasisUsd    String   // Total cost basis in USD
+
+  // Remaining amount (gets reduced as disposed)
+  remainingAmount String
+
+  // Disposal info (if fully disposed)
+  disposed        Boolean  @default(false)
+  disposedDate    DateTime?
+  disposedTxHash  String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([address, tokenAddress])
+  @@index([disposed])
+}
