@@ -2,8 +2,9 @@ services:
   - type: web
     name: oneminute-tax-backend
     runtime: node
-    buildCommand: cd backend && npm install && npx prisma generate && npm run build
-    startCommand: cd backend && npm run start:prod
+    rootDir: backend
+    buildCommand: npm install && npx prisma generate && npm run build
+    startCommand: npm run start:prod
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
