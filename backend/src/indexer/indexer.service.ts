@@ -57,6 +57,53 @@ export class IndexerService {
   }
 
   /**
+   * Get average block time for network (in seconds)
+   */
+  private getBlockTime(network: string): number {
+    if (network === 'mantle') {
+      return 2; // Mantle: 2 second block time
+    }
+    return 12; // Ethereum/Sepolia: ~12 second block time
+  }
+
+  /**
+   * Estimate block number from timestamp using block time (fallback method)
+   */
+  private estimateBlockFromTimestamp(timestamp: number, network: string): number {
+    // Known reference points for each network
+    const referencePoints: Record<string, { timestamp: number; block: number }> = {
+      mantle: {
+        timestamp: 1736851212, // 2026-01-14 10:20:12 UTC
+        block: 90127850,
+      },
+      ethereum: {
+        timestamp: 1704067200, // 2024-01-01 00:00:00 UTC
+        block: 18900000,
+      },
+      sepolia: {
+        timestamp: 1704067200, // 2024-01-01 00:00:00 UTC
+        block: 5000000,
+      },
+    };
+
+    const reference = referencePoints[network] || referencePoints.ethereum;
+    const blockTime = this.getBlockTime(network);
+
+    // Calculate time difference in seconds
+    const timeDiff = timestamp - reference.timestamp;
+
+    // Estimate block difference
+    const blockDiff = Math.floor(timeDiff / blockTime);
+
+    // Calculate estimated block number
+    const estimatedBlock = reference.block + blockDiff;
+
+    this.logger.debug(`Estimated block ${estimatedBlock} for timestamp ${timestamp} on ${network} (block time: ${blockTime}s)`);
+
+    return Math.max(0, estimatedBlock); // Ensure non-negative
+  }
+
+  /**
    * Get block number by timestamp using Etherscan API
    */
   private async getBlockByTimestamp(
@@ -84,10 +131,13 @@ export class IndexerService {
         return parseInt(data.result);
       }
 
-      throw new Error(`Failed to fetch block number: ${data.message}`);
+      // API failed, use block time estimation as fallback
+      this.logger.warn(`API failed to get block for timestamp ${timestamp}, using block time estimation`);
+      return this.estimateBlockFromTimestamp(timestamp, network);
     } catch (error) {
-      this.logger.error(`Error fetching block by timestamp: ${error.message}`);
-      throw error;
+      this.logger.error(`Error fetching block by timestamp: ${error.message}, using block time estimation`);
+      // Fallback to block time estimation
+      return this.estimateBlockFromTimestamp(timestamp, network);
     }
   }
 
