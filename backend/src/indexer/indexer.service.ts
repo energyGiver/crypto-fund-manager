@@ -127,12 +127,20 @@ export class IndexerService {
       const response = await fetch(url);
       const data = await response.json();
 
-      if (data.status === '1') {
-        return parseInt(data.result);
+      if (data.status === '1' && data.result) {
+        const blockNumber = parseInt(data.result);
+
+        // Validate parsed block number
+        if (!isNaN(blockNumber) && blockNumber > 0) {
+          return blockNumber;
+        }
+
+        this.logger.warn(`Invalid block number from API: ${data.result}, using block time estimation`);
+        return this.estimateBlockFromTimestamp(timestamp, network);
       }
 
       // API failed, use block time estimation as fallback
-      this.logger.warn(`API failed to get block for timestamp ${timestamp}, using block time estimation`);
+      this.logger.warn(`API failed to get block for timestamp ${timestamp} (status: ${data.status}, message: ${data.message}), using block time estimation`);
       return this.estimateBlockFromTimestamp(timestamp, network);
     } catch (error) {
       this.logger.error(`Error fetching block by timestamp: ${error.message}, using block time estimation`);
