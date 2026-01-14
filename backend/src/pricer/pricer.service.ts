@@ -42,6 +42,17 @@ export class PricerService {
   async priceTaxEvents(jobId: string): Promise<void> {
     this.logger.log(`Pricing tax events for job ${jobId}`);
 
+    // Get job to determine network
+    const job = await this.prisma.job.findUnique({
+      where: { id: jobId },
+    });
+
+    if (!job) {
+      throw new Error(`Job ${jobId} not found`);
+    }
+
+    const nativeToken = job.network === 'mantle' ? 'MNT' : 'ETH';
+
     const events = await this.prisma.taxEvent.findMany({
       where: { jobId },
       orderBy: { timestamp: 'asc' },
@@ -57,6 +68,7 @@ export class PricerService {
             event.tokenIn,
             event.tokenInSymbol,
             event.timestamp,
+            job.network,
           );
 
           if (price) {
@@ -79,6 +91,7 @@ export class PricerService {
             event.tokenOut,
             event.tokenOutSymbol,
             event.timestamp,
+            job.network,
           );
 
           if (price) {
@@ -96,12 +109,12 @@ export class PricerService {
           this.logger.debug(`Skipping price lookup for tokenOut ${event.tokenOut}: No symbol available (tx: ${event.txHash})`);
         }
 
-        // Price gas fee in ETH
-        const ethPrice = await this.getTokenPrice('ETH', 'ETH', event.timestamp);
-        if (ethPrice) {
+        // Price gas fee in native token (ETH or MNT)
+        const nativePrice = await this.getTokenPrice(nativeToken, nativeToken, event.timestamp, job.network);
+        if (nativePrice) {
           const gasFeeEthBN = ethers.BigNumber.from(event.gasFeeEth);
           const gasFeeEthDecimal = parseFloat(ethers.utils.formatEther(gasFeeEthBN));
-          const gasFeeUsd = (gasFeeEthDecimal * parseFloat(ethPrice.priceUsd)).toFixed(2);
+          const gasFeeUsd = (gasFeeEthDecimal * parseFloat(nativePrice.priceUsd)).toFixed(2);
 
           await this.prisma.taxEvent.update({
             where: { id: event.id },
@@ -138,6 +151,7 @@ export class PricerService {
     tokenAddress: string,
     tokenSymbol: string,
     timestamp: Date,
+    network: string,
   ): Promise<PriceData | null> {
     const normalizedAddress = tokenAddress.toLowerCase();
 
@@ -162,7 +176,7 @@ export class PricerService {
     }
 
     // Fetch from CoinMarketCap or other source
-    const price = await this.fetchPriceFromAPI(tokenSymbol, timestamp);
+    const price = await this.fetchPriceFromAPI(tokenAddress, tokenSymbol, timestamp, network);
 
     if (price) {
       // Cache the price
@@ -185,16 +199,44 @@ export class PricerService {
   }
 
   /**
-   * Fetch price from external API (CoinMarketCap, CoinGecko, etc.)
+   * Fetch price from external API (CoinMarketCap, CoinGecko, DefiLlama, etc.)
    */
-  private async fetchPriceFromAPI(symbol: string, timestamp: Date): Promise<PriceData | null> {
-    // For MVP, we'll use a simple approach
-    // In production, you'd use CoinMarketCap historical data API
+  private async fetchPriceFromAPI(tokenAddress: string, symbol: string, timestamp: Date, network: string): Promise<PriceData | null> {
+    // Try DefiLlama first (supports historical data and is free)
+    try {
+      const timestampUnix = Math.floor(timestamp.getTime() / 1000);
+      let defillamaId: string | null = null;
 
-    // ETH price approximation (for demo)
+      // For native tokens, use CoinGecko IDs
+      const nativeTokenToCoinGeckoId: Record<string, string> = {
+        'ETH': 'coingecko:ethereum',
+        'MNT': 'coingecko:mantle',
+      };
+
+      if (nativeTokenToCoinGeckoId[symbol]) {
+        defillamaId = nativeTokenToCoinGeckoId[symbol];
+      } else {
+        // For ERC20 tokens, use network:address format
+        const networkName = network === 'sepolia' ? 'ethereum' : network; // sepolia uses ethereum prices
+        defillamaId = `${networkName}:${tokenAddress.toLowerCase()}`;
+      }
+
+      if (defillamaId) {
+        const url = `https://coins.llama.fi/prices/historical/${timestampUnix}/${defillamaId}`;
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (data.coins && data.coins[defillamaId]) {
+          const price = data.coins[defillamaId].price;
+          return { priceUsd: price.toString(), source: 'defillama' };
+        }
+      }
+    } catch (error) {
+      this.logger.debug(`DefiLlama API error for ${symbol}: ${error.message}`);
+    }
+
+    // Fallback: ETH price approximation
     if (symbol === 'ETH') {
-      // You can replace this with actual API call
-      // For now, use approximate ETH prices by year
       const year = timestamp.getFullYear();
       const ethPricesByYear: Record<number, number> = {
         2020: 400,
@@ -207,6 +249,20 @@ export class PricerService {
       };
 
       const price = ethPricesByYear[year] || 2000;
+      return { priceUsd: price.toString(), source: 'approximation' };
+    }
+
+    // Fallback: MNT price approximation
+    if (symbol === 'MNT') {
+      const year = timestamp.getFullYear();
+      const mntPricesByYear: Record<number, number> = {
+        2023: 0.5,
+        2024: 0.8,
+        2025: 1.0,
+        2026: 1.2,
+      };
+
+      const price = mntPricesByYear[year] || 0.8;
       return { priceUsd: price.toString(), source: 'approximation' };
     }
 

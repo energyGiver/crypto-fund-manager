@@ -19,8 +19,8 @@ export class CreateReportDto {
   month?: number; // 1-12 for specific month, undefined/null for full year
 
   @IsString()
-  @IsIn(['ethereum', 'sepolia'], {
-    message: 'Network must be either ethereum or sepolia',
+  @IsIn(['ethereum', 'sepolia', 'mantle'], {
+    message: 'Network must be ethereum, sepolia, or mantle',
   })
   network: string;
 }

@@ -102,7 +102,7 @@ export default function Home() {
                   <label className="block text-sm font-medium text-zinc-400 mb-3">
                     Network
                   </label>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-3 gap-3">
                     <button
                       type="button"
                       onClick={() => setNetwork('ethereum')}
@@ -112,6 +112,17 @@ export default function Home() {
                         }`}
                     >
                       <div className="text-sm font-medium">Ethereum</div>
+                      <div className="text-xs text-zinc-500">Mainnet</div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNetwork('mantle')}
+                      className={`px-4 py-3 rounded-lg border transition-all ${network === 'mantle'
+                        ? 'bg-blue-600/20 border-blue-600 text-blue-400'
+                        : 'bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:border-zinc-700'
+                        }`}
+                    >
+                      <div className="text-sm font-medium">Mantle</div>
                       <div className="text-xs text-zinc-500">Mainnet</div>
                     </button>
                     <button

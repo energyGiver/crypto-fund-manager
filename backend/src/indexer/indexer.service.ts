@@ -28,18 +28,31 @@ export class IndexerService {
 
   private getProvider(network: string): ethers.providers.JsonRpcProvider {
     const drpcKey = this.configService.get<string>('DRPC_KEY');
-    const networkName = network === 'sepolia' ? 'sepolia' : 'ethereum';
+    let networkName: string;
+    if (network === 'sepolia') {
+      networkName = 'sepolia';
+    } else if (network === 'mantle') {
+      networkName = 'mantle';
+    } else {
+      networkName = 'ethereum';
+    }
     const rpcUrl = `https://lb.drpc.org/ogrpc?network=${networkName}&dkey=${drpcKey}`;
     return new ethers.providers.JsonRpcProvider(rpcUrl);
   }
 
   private getEtherscanApiUrl(network: string): string {
+    if (network === 'mantle') {
+      return 'https://explorer.mantle.xyz/api';
+    }
     return network === 'sepolia'
       ? 'https://api.etherscan.io/v2/api'
       : 'https://api.etherscan.io/v2/api';
   }
 
   private getChainId(network: string): number {
+    if (network === 'mantle') {
+      return 5000;
+    }
     return network === 'sepolia' ? 11155111 : 1;
   }
 
