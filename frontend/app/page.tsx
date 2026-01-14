@@ -16,6 +16,16 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  const handleNetworkChange = (newNetwork: string) => {
+    setNetwork(newNetwork);
+
+    // Auto-adjust year if invalid for the network
+    const currentYear = parseInt(year);
+    if (newNetwork === 'mantle' && currentYear < 2023) {
+      setYear('2023');
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -105,7 +115,7 @@ export default function Home() {
                   <div className="grid grid-cols-3 gap-3">
                     <button
                       type="button"
-                      onClick={() => setNetwork('ethereum')}
+                      onClick={() => handleNetworkChange('ethereum')}
                       className={`px-4 py-3 rounded-lg border transition-all ${network === 'ethereum'
                         ? 'bg-blue-600/20 border-blue-600 text-blue-400'
                         : 'bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:border-zinc-700'
@@ -116,7 +126,7 @@ export default function Home() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setNetwork('mantle')}
+                      onClick={() => handleNetworkChange('mantle')}
                       className={`px-4 py-3 rounded-lg border transition-all ${network === 'mantle'
                         ? 'bg-blue-600/20 border-blue-600 text-blue-400'
                         : 'bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:border-zinc-700'
@@ -127,7 +137,7 @@ export default function Home() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setNetwork('sepolia')}
+                      onClick={() => handleNetworkChange('sepolia')}
                       className={`px-4 py-3 rounded-lg border transition-all ${network === 'sepolia'
                         ? 'bg-blue-600/20 border-blue-600 text-blue-400'
                         : 'bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:border-zinc-700'
@@ -151,7 +161,7 @@ export default function Home() {
                 <Input
                   label="Tax Year"
                   type="number"
-                  min="2015"
+                  min={network === 'mantle' ? '2023' : '2015'}
                   max="2026"
                   value={year}
                   onChange={(e) => setYear(e.target.value)}

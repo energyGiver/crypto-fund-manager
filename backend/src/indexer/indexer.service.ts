@@ -66,8 +66,15 @@ export class IndexerService {
   ): Promise<number> {
     const etherscanKey = this.configService.get<string>('ETHERSCAN_KEY');
     const baseUrl = this.getEtherscanApiUrl(network);
-    const chainId = this.getChainId(network);
-    const url = `${baseUrl}?chainid=${chainId}&module=block&action=getblocknobytime&timestamp=${timestamp}&closest=${closest}&apikey=${etherscanKey}`;
+
+    // Mantle Explorer doesn't need chainid parameter (it's Mantle-specific)
+    let url: string;
+    if (network === 'mantle') {
+      url = `${baseUrl}?module=block&action=getblocknobytime&timestamp=${timestamp}&closest=${closest}&apikey=${etherscanKey}`;
+    } else {
+      const chainId = this.getChainId(network);
+      url = `${baseUrl}?chainid=${chainId}&module=block&action=getblocknobytime&timestamp=${timestamp}&closest=${closest}&apikey=${etherscanKey}`;
+    }
 
     try {
       const response = await fetch(url);
@@ -90,6 +97,11 @@ export class IndexerService {
   async fetchTransactions(address: string, year: number, month: number | null, network: string, jobId: string): Promise<void> {
     const periodStr = month ? `${year}-${month.toString().padStart(2, '0')}` : `${year}`;
     this.logger.log(`Fetching transactions for ${address} in ${periodStr} on ${network}`);
+
+    // Validate year for network
+    if (network === 'mantle' && year < 2023) {
+      throw new Error('Mantle network launched in 2023. Please select a year from 2023 onwards.');
+    }
 
     const provider = this.getProvider(network);
 
