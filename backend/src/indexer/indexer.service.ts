@@ -17,9 +17,46 @@ interface TransactionData {
   logs: any[];
 }
 
+interface NetworkConfig {
+  blockTime: number; // seconds per block
+  referenceBlock: number; // known block number
+  referenceTimestamp: number; // unix timestamp for reference block
+  launchTimestamp: number; // network launch time
+  minYear: number; // minimum valid year
+  marginSeconds: number; // time margin for block range queries (in seconds)
+}
+
 @Injectable()
 export class IndexerService {
   private readonly logger = new Logger(IndexerService.name);
+
+  // Network configurations with accurate reference points
+  private readonly networkConfigs: Record<string, NetworkConfig> = {
+    mantle: {
+      blockTime: 2, // 2 second block time
+      referenceBlock: 90167285,
+      referenceTimestamp: 1736929482, // Jan-15-2026 08:14:42 AM +UTC
+      launchTimestamp: 1688169600, // July 1, 2023 (approximate)
+      minYear: 2023,
+      marginSeconds: 7200, // 2 hours margin
+    },
+    ethereum: {
+      blockTime: 12, // ~12 second block time
+      referenceBlock: 18900000,
+      referenceTimestamp: 1704067200, // 2024-01-01 00:00:00 UTC
+      launchTimestamp: 1438269988, // July 30, 2015 (genesis)
+      minYear: 2015,
+      marginSeconds: 86400, // 24 hours margin
+    },
+    sepolia: {
+      blockTime: 12, // ~12 second block time
+      referenceBlock: 5000000,
+      referenceTimestamp: 1704067200, // 2024-01-01 00:00:00 UTC
+      launchTimestamp: 1656586800, // June 30, 2022 (approximate)
+      minYear: 2022,
+      marginSeconds: 86400, // 24 hours margin
+    },
+  };
 
   constructor(
     private configService: ConfigService,
@@ -57,6 +94,74 @@ export class IndexerService {
   }
 
   /**
+   * Get network configuration
+   */
+  private getNetworkConfig(network: string): NetworkConfig {
+    return this.networkConfigs[network] || this.networkConfigs.ethereum;
+  }
+
+  /**
+   * Get current block number from RPC provider
+   */
+  private async getCurrentBlock(network: string): Promise<number> {
+    try {
+      const provider = this.getProvider(network);
+      const blockNumber = await provider.getBlockNumber();
+      return blockNumber;
+    } catch (error) {
+      this.logger.warn(`Failed to get current block for ${network}: ${error.message}`);
+      // Return a conservative estimate based on reference point
+      const config = this.getNetworkConfig(network);
+      const now = Math.floor(Date.now() / 1000);
+      const timeDiff = now - config.referenceTimestamp;
+      const blockDiff = Math.floor(timeDiff / config.blockTime);
+      return config.referenceBlock + blockDiff;
+    }
+  }
+
+  /**
+   * Estimate block number from timestamp using block time (fallback method)
+   */
+  private async estimateBlockFromTimestamp(timestamp: number, network: string): Promise<number> {
+    const config = this.getNetworkConfig(network);
+
+    // Calculate time difference in seconds
+    const timeDiff = timestamp - config.referenceTimestamp;
+
+    // Estimate block difference
+    const blockDiff = Math.floor(timeDiff / config.blockTime);
+
+    // Calculate estimated block number
+    let estimatedBlock = config.referenceBlock + blockDiff;
+
+    // Ensure block is not negative
+    estimatedBlock = Math.max(0, estimatedBlock);
+
+    // Check if estimated block is in the future
+    const currentBlock = await this.getCurrentBlock(network);
+    if (estimatedBlock > currentBlock) {
+      this.logger.warn(
+        `Estimated block ${estimatedBlock} is beyond current block ${currentBlock}, using current block instead`
+      );
+      estimatedBlock = currentBlock;
+    }
+
+    // Check if timestamp is before network launch
+    if (timestamp < config.launchTimestamp) {
+      this.logger.warn(
+        `Timestamp ${timestamp} is before ${network} launch (${config.launchTimestamp}), using block 0`
+      );
+      return 0;
+    }
+
+    this.logger.debug(
+      `Estimated block ${estimatedBlock} for timestamp ${timestamp} on ${network} (block time: ${config.blockTime}s, current block: ${currentBlock})`
+    );
+
+    return estimatedBlock;
+  }
+
+  /**
    * Get block number by timestamp using Etherscan API
    */
   private async getBlockByTimestamp(
@@ -66,21 +171,39 @@ export class IndexerService {
   ): Promise<number> {
     const etherscanKey = this.configService.get<string>('ETHERSCAN_KEY');
     const baseUrl = this.getEtherscanApiUrl(network);
-    const chainId = this.getChainId(network);
-    const url = `${baseUrl}?chainid=${chainId}&module=block&action=getblocknobytime&timestamp=${timestamp}&closest=${closest}&apikey=${etherscanKey}`;
+
+    // Mantle Explorer doesn't need chainid parameter (it's Mantle-specific)
+    let url: string;
+    if (network === 'mantle') {
+      url = `${baseUrl}?module=block&action=getblocknobytime&timestamp=${timestamp}&closest=${closest}&apikey=${etherscanKey}`;
+    } else {
+      const chainId = this.getChainId(network);
+      url = `${baseUrl}?chainid=${chainId}&module=block&action=getblocknobytime&timestamp=${timestamp}&closest=${closest}&apikey=${etherscanKey}`;
+    }
 
     try {
       const response = await fetch(url);
       const data = await response.json();
 
-      if (data.status === '1') {
-        return parseInt(data.result);
+      if (data.status === '1' && data.result) {
+        const blockNumber = parseInt(data.result);
+
+        // Validate parsed block number
+        if (!isNaN(blockNumber) && blockNumber > 0) {
+          return blockNumber;
+        }
+
+        this.logger.warn(`Invalid block number from API: ${data.result}, using block time estimation`);
+        return await this.estimateBlockFromTimestamp(timestamp, network);
       }
 
-      throw new Error(`Failed to fetch block number: ${data.message}`);
+      // API failed, use block time estimation as fallback
+      this.logger.warn(`API failed to get block for timestamp ${timestamp} (status: ${data.status}, message: ${data.message}), using block time estimation`);
+      return await this.estimateBlockFromTimestamp(timestamp, network);
     } catch (error) {
-      this.logger.error(`Error fetching block by timestamp: ${error.message}`);
-      throw error;
+      this.logger.error(`Error fetching block by timestamp: ${error.message}, using block time estimation`);
+      // Fallback to block time estimation
+      return await this.estimateBlockFromTimestamp(timestamp, network);
     }
   }
 
@@ -88,8 +211,14 @@ export class IndexerService {
    * Fetch all transactions for an address within a specific year/month
    */
   async fetchTransactions(address: string, year: number, month: number | null, network: string, jobId: string): Promise<void> {
+    const config = this.getNetworkConfig(network);
     const periodStr = month ? `${year}-${month.toString().padStart(2, '0')}` : `${year}`;
     this.logger.log(`Fetching transactions for ${address} in ${periodStr} on ${network}`);
+
+    // Validate year for network
+    if (year < config.minYear) {
+      throw new Error(`${network} network launched in ${config.minYear}. Please select a year from ${config.minYear} onwards.`);
+    }
 
     const provider = this.getProvider(network);
 
@@ -119,30 +248,36 @@ export class IndexerService {
       startBlock = await this.getBlockByTimestamp(startTimestamp, 'after', network);
       endBlock = await this.getBlockByTimestamp(endTimestamp, 'before', network);
 
-      // Add margin: ~7200 blocks per day (12 sec per block)
-      const marginBlocks = 7200; // 1 day margin
+      // Calculate margin in blocks based on marginSeconds configuration
+      const marginBlocks = Math.floor(config.marginSeconds / config.blockTime);
       startBlock = Math.max(0, startBlock - marginBlocks);
       endBlock = endBlock + marginBlocks;
 
-      this.logger.log(`Fetching transactions in block range ${startBlock} - ${endBlock} (with margins)`);
+      // Ensure endBlock doesn't exceed current block
+      const currentBlock = await this.getCurrentBlock(network);
+      if (endBlock > currentBlock) {
+        this.logger.warn(`End block ${endBlock} exceeds current block ${currentBlock}, using current block`);
+        endBlock = currentBlock;
+      }
+
+      this.logger.log(
+        `Fetching transactions in block range ${startBlock} - ${endBlock} (margin: ${marginBlocks} blocks = ${config.marginSeconds}s)`
+      );
     } catch (error) {
       this.logger.warn(`Failed to fetch block numbers by timestamp, using estimation: ${error.message}`);
 
-      // Estimate block numbers based on average block time (12 seconds)
-      // Reference: Jan-10-2026 07:27:23 UTC = block 24202797
-      const REFERENCE_TIMESTAMP = 1768030043; // Jan-10-2026 07:27:23 UTC
-      const REFERENCE_BLOCK = 24202797;
-      const AVG_BLOCK_TIME = 12; // seconds per block
-
-      const startBlockEstimate = REFERENCE_BLOCK + Math.floor((startTimestamp - REFERENCE_TIMESTAMP) / AVG_BLOCK_TIME);
-      const endBlockEstimate = REFERENCE_BLOCK + Math.floor((endTimestamp - REFERENCE_TIMESTAMP) / AVG_BLOCK_TIME);
+      // Use network config for estimation
+      startBlock = await this.estimateBlockFromTimestamp(startTimestamp, network);
+      endBlock = await this.estimateBlockFromTimestamp(endTimestamp, network);
 
       // Add margin
-      const marginBlocks = 7200;
-      startBlock = Math.max(0, startBlockEstimate - marginBlocks);
-      endBlock = endBlockEstimate + marginBlocks;
+      const marginBlocks = Math.floor(config.marginSeconds / config.blockTime);
+      startBlock = Math.max(0, startBlock - marginBlocks);
+      endBlock = Math.min(endBlock + marginBlocks, await this.getCurrentBlock(network));
 
-      this.logger.log(`Estimated block range: ${startBlock} - ${endBlock} (based on reference block)`);
+      this.logger.log(
+        `Estimated block range: ${startBlock} - ${endBlock} (margin: ${marginBlocks} blocks)`
+      );
     }
 
     // Fetch transactions using Etherscan API
@@ -268,6 +403,7 @@ export class IndexerService {
    * Fetch ERC20 token transfers
    */
   async fetchTokenTransfers(address: string, year: number, month: number | null, network: string, jobId: string): Promise<void> {
+    const config = this.getNetworkConfig(network);
     const periodStr = month ? `${year}-${month.toString().padStart(2, '0')}` : `${year}`;
     this.logger.log(`Fetching ERC20 transfers for ${address} in ${periodStr} on ${network}`);
 
@@ -295,25 +431,28 @@ export class IndexerService {
       startBlock = await this.getBlockByTimestamp(startTimestamp, 'after', network);
       endBlock = await this.getBlockByTimestamp(endTimestamp, 'before', network);
 
-      // Add margin
-      const marginBlocks = 7200;
+      // Calculate margin in blocks
+      const marginBlocks = Math.floor(config.marginSeconds / config.blockTime);
       startBlock = Math.max(0, startBlock - marginBlocks);
       endBlock = endBlock + marginBlocks;
+
+      // Ensure endBlock doesn't exceed current block
+      const currentBlock = await this.getCurrentBlock(network);
+      if (endBlock > currentBlock) {
+        this.logger.warn(`End block ${endBlock} exceeds current block ${currentBlock} for token transfers, using current block`);
+        endBlock = currentBlock;
+      }
     } catch (error) {
       this.logger.warn(`Failed to fetch block numbers for token transfers, using estimation`);
 
-      // Estimate block numbers based on average block time (12 seconds)
-      // Reference: Jan-10-2026 07:27:23 UTC = block 24202797
-      const REFERENCE_TIMESTAMP = 1768030043;
-      const REFERENCE_BLOCK = 24202797;
-      const AVG_BLOCK_TIME = 12;
+      // Use network config for estimation
+      startBlock = await this.estimateBlockFromTimestamp(startTimestamp, network);
+      endBlock = await this.estimateBlockFromTimestamp(endTimestamp, network);
 
-      const startBlockEstimate = REFERENCE_BLOCK + Math.floor((startTimestamp - REFERENCE_TIMESTAMP) / AVG_BLOCK_TIME);
-      const endBlockEstimate = REFERENCE_BLOCK + Math.floor((endTimestamp - REFERENCE_TIMESTAMP) / AVG_BLOCK_TIME);
-
-      const marginBlocks = 7200;
-      startBlock = Math.max(0, startBlockEstimate - marginBlocks);
-      endBlock = endBlockEstimate + marginBlocks;
+      // Add margin
+      const marginBlocks = Math.floor(config.marginSeconds / config.blockTime);
+      startBlock = Math.max(0, startBlock - marginBlocks);
+      endBlock = Math.min(endBlock + marginBlocks, await this.getCurrentBlock(network));
 
       this.logger.log(`Estimated token transfer block range: ${startBlock} - ${endBlock}`);
     }
