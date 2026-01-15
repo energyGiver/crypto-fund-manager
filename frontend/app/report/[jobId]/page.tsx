@@ -56,6 +56,7 @@ export default function ReportPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
+  const [showGainsOnly, setShowGainsOnly] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 20;
 
@@ -94,15 +95,35 @@ export default function ReportPage() {
     );
   }
 
-  const filteredEvents = selectedCategory === 'all'
-    ? report.events
-    : report.events.filter(e => e.category === selectedCategory);
+  // Filter logic for events and holdings
+  let displayItems: any[] = [];
+
+  if (selectedCategory === 'UNREALIZED') {
+    // Show unrealized holdings
+    const holdings = report.holdings || [];
+    displayItems = holdings.map(h => ({
+      ...h,
+      category: 'UNREALIZED',
+      timestamp: h.acquiredDate,
+      txHash: h.acquiredTxHash,
+    }));
+
+    // If showGainsOnly is true, filter to only show positions with gains
+    if (showGainsOnly) {
+      displayItems = displayItems.filter(item => parseFloat(item.unrealizedGain) > 0);
+    }
+  } else {
+    // Show tax events
+    displayItems = selectedCategory === 'all'
+      ? report.events
+      : report.events.filter(e => e.category === selectedCategory);
+  }
 
   // Pagination
-  const totalPages = Math.ceil(filteredEvents.length / pageSize);
+  const totalPages = Math.ceil(displayItems.length / pageSize);
   const startIdx = (currentPage - 1) * pageSize;
   const endIdx = startIdx + pageSize;
-  const paginatedEvents = filteredEvents.slice(startIdx, endIdx);
+  const paginatedItems = displayItems.slice(startIdx, endIdx);
 
   return (
     <div className="min-h-screen bg-black">
@@ -220,14 +241,34 @@ export default function ReportPage() {
                         <StrategyBody text={strategy.body} />
                         {strategy.actions && strategy.actions.length > 0 && (
                           <ul className="space-y-3 mt-4">
-                            {strategy.actions.map((action, i) => (
-                              <li key={i} className="flex items-start gap-3 text-sm text-zinc-500 leading-relaxed">
-                                <svg className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                                </svg>
-                                {action}
-                              </li>
-                            ))}
+                            {strategy.actions.map((action, i) => {
+                              const isUnrealizedLink = action.toLowerCase().includes('identify positions') ||
+                                                       action.toLowerCase().includes('unrealized gains');
+
+                              return (
+                                <li key={i} className="flex items-start gap-3 text-sm leading-relaxed">
+                                  <svg className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                  </svg>
+                                  {isUnrealizedLink ? (
+                                    <button
+                                      onClick={() => {
+                                        setSelectedCategory('UNREALIZED');
+                                        setShowGainsOnly(true);
+                                        setCurrentPage(1);
+                                        // Scroll to transactions section
+                                        document.querySelector('section:last-of-type')?.scrollIntoView({ behavior: 'smooth' });
+                                      }}
+                                      className="text-blue-400 hover:text-blue-300 underline cursor-pointer text-left"
+                                    >
+                                      {action}
+                                    </button>
+                                  ) : (
+                                    <span className="text-zinc-500">{action}</span>
+                                  )}
+                                </li>
+                              );
+                            })}
                           </ul>
                         )}
                       </div>
@@ -243,11 +284,12 @@ export default function ReportPage() {
               <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-white">Transactions</h2>
               <div className="flex gap-2 flex-wrap">
-                {['all', 'DISPOSAL', 'AIRDROP', 'STAKING', 'TRANSFER'].map((cat) => (
+                {['all', 'DISPOSAL', 'AIRDROP', 'STAKING', 'TRANSFER', 'UNREALIZED'].map((cat) => (
                   <button
                     key={cat}
                     onClick={() => {
                       setSelectedCategory(cat);
+                      setShowGainsOnly(false); // Reset gains filter when changing category
                       setCurrentPage(1);
                     }}
                     className={`
@@ -258,75 +300,109 @@ export default function ReportPage() {
                       }
                     `}
                   >
-                    {cat === 'all' ? 'All' : cat.toLowerCase()}
+                    {cat === 'all' ? 'All' : cat === 'UNREALIZED' ? 'Unrealized' : cat.charAt(0) + cat.slice(1).toLowerCase()}
                   </button>
                 ))}
               </div>
               </div>
 
               <div className="space-y-3 mt-4">
-              {filteredEvents.length === 0 ? (
+              {displayItems.length === 0 ? (
                 <Card className="p-8 text-center">
                   <p className="text-zinc-500">No transactions found</p>
                 </Card>
               ) : (
-                paginatedEvents.map((event) => (
-                  <Card key={event.id} hover className="p-6">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="flex items-center gap-4 flex-1 min-w-0">
-                        <div className={`
-                          px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap
-                          ${event.category === 'DISPOSAL' ? 'bg-red-600/20 text-red-400' : ''}
-                          ${event.category === 'AIRDROP' ? 'bg-green-600/20 text-green-400' : ''}
-                          ${event.category === 'STAKING' ? 'bg-blue-600/20 text-blue-400' : ''}
-                          ${event.category === 'TRANSFER' ? 'bg-zinc-600/20 text-zinc-400' : ''}
-                        `}>
-                          {event.category}
+                paginatedItems.map((item) => (
+                  <Card key={item.id} hover className="p-6">
+                    {item.category === 'UNREALIZED' ? (
+                      // Unrealized holding display
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-4 flex-1 min-w-0">
+                          <div className="px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap bg-purple-600/20 text-purple-400">
+                            UNREALIZED
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm text-white font-medium">
+                              {item.tokenSymbol}
+                            </div>
+                            <p className="text-xs text-zinc-500 font-mono truncate">
+                              {item.tokenAddress.slice(0, 8)}...{item.tokenAddress.slice(-6)}
+                            </p>
+                            <p className="text-xs text-zinc-600 mt-0.5">
+                              {parseFloat(item.amount).toFixed(4)} tokens @ ${parseFloat(item.currentPrice).toFixed(6)}
+                            </p>
+                          </div>
+                          <div className="hidden md:block text-xs text-zinc-600">
+                            Acquired: {new Date(item.acquiredDate).toLocaleDateString()}
+                          </div>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <a
-                            href={`https://etherscan.io/tx/${event.txHash}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-sm text-blue-400 hover:text-blue-300 font-medium font-mono block truncate"
-                          >
-                            {event.txHash.slice(0, 10)}...{event.txHash.slice(-8)}
-                          </a>
+                        <div className="text-right whitespace-nowrap">
+                          <p className={`text-sm font-medium ${parseFloat(item.unrealizedGain) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                            ${formatAmount(item.unrealizedGain)}
+                          </p>
                           <p className="text-xs text-zinc-500">
-                            {new Date(event.timestamp).toLocaleDateString()}
+                            Value: ${formatAmount(item.currentValue)}
                           </p>
                         </div>
-                        {event.protocol && (
-                          <span className="text-xs text-zinc-600 hidden md:block">{event.protocol}</span>
-                        )}
                       </div>
-                      <div className="text-right whitespace-nowrap">
-                        {event.realizedGain && (
-                          <p className={`text-sm font-medium ${parseFloat(event.realizedGain) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                            ${formatAmount(event.realizedGain)}
-                          </p>
-                        )}
-                        {event.tokenInUsd && parseFloat(event.tokenInUsd) > 0 ? (
-                          <p className="text-xs text-zinc-500">
-                            ${formatAmount(event.tokenInUsd)}
-                          </p>
-                        ) : event.tokenInUsd && parseFloat(event.tokenInUsd) === 0 && event.category !== 'DISPOSAL' ? (
-                          <p className="text-xs text-zinc-600">
-                            —
-                          </p>
-                        ) : null}
+                    ) : (
+                      // Tax event display
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-4 flex-1 min-w-0">
+                          <div className={`
+                            px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap
+                            ${item.category === 'DISPOSAL' ? 'bg-red-600/20 text-red-400' : ''}
+                            ${item.category === 'AIRDROP' ? 'bg-green-600/20 text-green-400' : ''}
+                            ${item.category === 'STAKING' ? 'bg-blue-600/20 text-blue-400' : ''}
+                            ${item.category === 'TRANSFER' ? 'bg-zinc-600/20 text-zinc-400' : ''}
+                          `}>
+                            {item.category}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <a
+                              href={`https://etherscan.io/tx/${item.txHash}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-sm text-blue-400 hover:text-blue-300 font-medium font-mono block truncate"
+                            >
+                              {item.txHash.slice(0, 10)}...{item.txHash.slice(-8)}
+                            </a>
+                            <p className="text-xs text-zinc-500">
+                              {new Date(item.timestamp).toLocaleDateString()}
+                            </p>
+                          </div>
+                          {item.protocol && (
+                            <span className="text-xs text-zinc-600 hidden md:block">{item.protocol}</span>
+                          )}
+                        </div>
+                        <div className="text-right whitespace-nowrap">
+                          {item.realizedGain && (
+                            <p className={`text-sm font-medium ${parseFloat(item.realizedGain) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                              ${formatAmount(item.realizedGain)}
+                            </p>
+                          )}
+                          {item.tokenInUsd && parseFloat(item.tokenInUsd) > 0 ? (
+                            <p className="text-xs text-zinc-500">
+                              ${formatAmount(item.tokenInUsd)}
+                            </p>
+                          ) : item.tokenInUsd && parseFloat(item.tokenInUsd) === 0 && item.category !== 'DISPOSAL' ? (
+                            <p className="text-xs text-zinc-600">
+                              —
+                            </p>
+                          ) : null}
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </Card>
                 ))
               )}
             </div>
 
             {/* Pagination */}
-            {filteredEvents.length > pageSize && (
+            {displayItems.length > pageSize && (
               <div className="mt-6 flex items-center justify-between">
                 <p className="text-sm text-zinc-500">
-                  Showing {startIdx + 1}–{Math.min(endIdx, filteredEvents.length)} of {filteredEvents.length}
+                  Showing {startIdx + 1}–{Math.min(endIdx, displayItems.length)} of {displayItems.length}
                 </p>
                 <div className="flex items-center gap-2">
                   <button
