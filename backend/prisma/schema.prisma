@@ -152,15 +152,16 @@ model CostLot {
   address         String   // User address
   tokenAddress    String
   tokenSymbol     String
+  tokenDecimals   Int      @default(18) // Token decimals
 
   // Acquisition info
   acquiredDate    DateTime
   acquiredTxHash  String
-  amount          String   // Amount acquired
+  amount          String   // Amount acquired (in smallest unit, e.g., wei)
   costBasisUsd    String   // Total cost basis in USD
 
   // Remaining amount (gets reduced as disposed)
-  remainingAmount String
+  remainingAmount String   // Remaining amount in smallest unit
 
   // Disposal info (if fully disposed)
   disposed        Boolean  @default(false)

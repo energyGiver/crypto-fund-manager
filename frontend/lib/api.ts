@@ -61,6 +61,18 @@ export interface TaxReport {
     protocol?: string;
     notes?: string;
   }>;
+  holdings: Array<{
+    id: string;
+    tokenSymbol: string;
+    tokenAddress: string;
+    amount: string;
+    costBasis: string;
+    currentValue: string;
+    unrealizedGain: string;
+    currentPrice: string;
+    acquiredDate: string;
+    acquiredTxHash: string;
+  }>;
 }
 
 export class ApiClient {

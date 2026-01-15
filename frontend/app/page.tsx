@@ -12,7 +12,7 @@ export default function Home() {
   const [address, setAddress] = useState('');
   const [year, setYear] = useState('2026');
   const [month, setMonth] = useState('0'); // 0 = full year, 1-12 = specific month
-  const [network, setNetwork] = useState('ethereum');
+  const [network, setNetwork] = useState('mantle');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
